@@ -95,7 +95,9 @@ int main(void)
   MX_TIM1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+#ifdef DEBUG_MSG
   Log("RC Control started");
+#endif  // DEBUG_MSG
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1000);
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 1500);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -116,7 +118,7 @@ int main(void)
   while (1)
   {
 	  i = (i+ 100)%1300;
-
+#ifdef DEBUG_MSG
 	  Log_msg_length = sprintf(Log_msg, "Mode: CH3: %lu  ",getMode(RC_CH3));
 	  Logl(Log_msg, Log_msg_length);
 	  Log_msg_length = sprintf(Log_msg, "CH4: %lu\r\n",getMode(RC_CH4));
@@ -126,12 +128,22 @@ int main(void)
 	  Logl(Log_msg, Log_msg_length);
 	  Log_msg_length = sprintf(Log_msg, "CH4: %lu\r\n",getLast(RC_CH4));
 	  Logl(Log_msg, Log_msg_length);
-
+#endif  // DEBUG_MSG
 
 	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, i);
 	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, i*2+50);
 
-	  HAL_Delay(500);
+
+	  if(getMode(RC_CH3)==RC_MODE3_2)
+	  {
+		  HAL_GPIO_WritePin(LED_OUT_GPIO_Port, LED_OUT_Pin, GPIO_PIN_SET);
+	  }
+	  else
+	  {
+		  HAL_GPIO_WritePin(LED_OUT_GPIO_Port, LED_OUT_Pin, GPIO_PIN_RESET);
+	  }
+
+	  HAL_Delay(1);
 
 
 
