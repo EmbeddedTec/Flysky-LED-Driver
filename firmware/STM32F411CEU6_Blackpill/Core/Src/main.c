@@ -24,6 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "switches.h"
 #include "Logger.h"
 #include "PWM_control.h"
 #include <stdio.h>
@@ -91,60 +92,27 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM2_Init();
-  MX_TIM3_Init();
   MX_TIM1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 #ifdef DEBUG_MSG
-  Log("RC Control started");
+  Log("RC Control started\r\n");
 #endif  // DEBUG_MSG
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1000);
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 1500);
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
-  // Start PWM output on TIM3_CH1
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  //HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-  // Start PWM input on TIM2_CH2
-  HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
-  HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2);
 
-  int i =100;
+  PWM_Control_Init();
+
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  i = (i+ 100)%1300;
-#ifdef DEBUG_MSG
-	  Log_msg_length = sprintf(Log_msg, "Mode: CH3: %lu  ",getMode(RC_CH3));
-	  Logl(Log_msg, Log_msg_length);
-	  Log_msg_length = sprintf(Log_msg, "CH4: %lu\r\n",getMode(RC_CH4));
-	  Logl(Log_msg, Log_msg_length);
 
-	  Log_msg_length = sprintf(Log_msg, "Last: CH3: %lu  ",getLast(RC_CH3));
-	  Logl(Log_msg, Log_msg_length);
-	  Log_msg_length = sprintf(Log_msg, "CH4: %lu\r\n",getLast(RC_CH4));
-	  Logl(Log_msg, Log_msg_length);
-#endif  // DEBUG_MSG
-
-	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, i);
-	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, i*2+50);
-
-
-	  if(getMode(RC_CH3)==RC_MODE3_2)
-	  {
-		  HAL_GPIO_WritePin(LED_OUT_GPIO_Port, LED_OUT_Pin, GPIO_PIN_SET);
-	  }
-	  else
-	  {
-		  HAL_GPIO_WritePin(LED_OUT_GPIO_Port, LED_OUT_Pin, GPIO_PIN_RESET);
-	  }
-
+	  PWM_Control_Process();
 	  HAL_Delay(1);
-
 
 
     /* USER CODE END WHILE */

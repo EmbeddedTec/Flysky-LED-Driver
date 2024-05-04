@@ -1,6 +1,7 @@
 #include "PWM_control.h"
 #include "tim.h"
-
+#include <stdio.h>
+#include "queue.h"
 static const RC_MODE_RANGE_ARRAY_T ranges_array_CH3[] =
 {
 		{   0,		 300, 	RC_MODE3_OFF},
@@ -25,15 +26,44 @@ static const RC_MODE_RANGE_T ranges_CH4= {
 		ranges_array_CH4 , 3, RC_MODE4_OFF
 };
 
+static uint8_t run = 0;
 
 static uint32_t Last_Ch3;
 static uint32_t Last_Ch4;
 
-static RC_MODE_CH3_T mode_ch3 = RC_MODE3_OFF;
-static RC_MODE_CH4_T mode_ch4 = RC_MODE4_OFF;
+static volatile RC_MODE_CH3_T mode_ch3 = RC_MODE3_OFF;
+static volatile RC_MODE_CH4_T mode_ch4 = RC_MODE4_OFF;
+
+static volatile uint32_t led_pwm = 0;
+
+static Queue commandQueue;
 
 
 uint8_t getModeFromPulsewidthinRange(RC_MODE_RANGE_T range, uint32_t pw);
+void process_Mode();
+
+
+
+void PWM_Control_Init()
+{
+	initializeQueue(&commandQueue);
+
+	//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	// Start PWM input on TIM2_CH2
+	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
+	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2);
+
+	led_pwm = 0;
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, led_pwm);
+
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	run = 1;
+
+}
+void PWM_Control_DeInit()
+{
+	run = 0;
+}
 
 
 
@@ -57,15 +87,28 @@ uint8_t getModeFromPulsewidthinRange(RC_MODE_RANGE_T range, uint32_t pw)
 
 void UpdatePulseWidth(RC_CHANNEL_TYPE channel, uint32_t pw)
 {
+	static RC_MODE_CH3_T prev_mode_ch3 = RC_MODE3_OFF;
+	static RC_MODE_CH4_T prev_mode_ch4 = RC_MODE4_OFF;
 
 	switch (channel) {
 	case RC_CH3:
-		mode_ch3 = getModeFromPulsewidthinRange(ranges_CH3, pw);
 		Last_Ch3 = pw;
+		mode_ch3 = getModeFromPulsewidthinRange(ranges_CH3, pw);
+
+		if(mode_ch3 != prev_mode_ch3)
+		{
+			process_Mode();
+			prev_mode_ch3 = mode_ch3;
+		}
 		break;
 	case RC_CH4:
-		mode_ch4 = getModeFromPulsewidthinRange(ranges_CH4, pw);
 		Last_Ch4 = pw;
+		mode_ch4 = getModeFromPulsewidthinRange(ranges_CH4, pw);
+		if(mode_ch4 != prev_mode_ch4)
+		{
+			process_Mode();
+			prev_mode_ch4 = mode_ch4;
+		}
 		break;
 	default:
 		break;
@@ -171,6 +214,221 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 	}
 }
 
+void LED_Off()
+{
+	led_pwm = 0;
+	//HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+}
+
+void LED_FullOn()
+{
+	led_pwm = 1000;
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, led_pwm);
+
+	//HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+}
+
+void LED_HalfOn()
+{
+	led_pwm = 500;
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, led_pwm);
+
+	//HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+}
+
+
+#define DIM_DELAY 1
+#define INC_VAL 4
+void DimTo(uint32_t value)
+{
+	//Limit PWM value to PWM bounds
+	if(value < PWM_MIN_VAL)
+	{
+		value = PWM_MIN_VAL;
+	}
+	else
+	{
+		if(value > PWM_MAX_VAL)
+		{
+			value = PWM_MAX_VAL;
+		}
+	}
+
+	if(value == led_pwm)
+	{
+		//do nothing
+		Log_msg_length = sprintf(Log_msg, "Will stay on : %lu \r\n ",led_pwm);
+		Logl(Log_msg, Log_msg_length);
+	}
+	else
+	{
+		if (value > led_pwm)
+		{
+			Log_msg_length = sprintf(Log_msg, "Dimming up from  %lu to %lu  \r\n",led_pwm, value);
+			Logl(Log_msg, Log_msg_length);
+			while(value > led_pwm)
+			{
+				if(led_pwm < PWM_MAX_VAL-INC_VAL)
+				{
+					led_pwm = led_pwm + INC_VAL;
+				}
+				else
+				{
+					led_pwm = PWM_MAX_VAL;
+				}
+
+				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, led_pwm);
+				HAL_Delay(DIM_DELAY);
+			}
+		}
+		else // value < led_pwm
+		{
+			Log_msg_length = sprintf(Log_msg, "Dimming down from  %lu to %lu  \r\n",led_pwm, value);
+			Logl(Log_msg, Log_msg_length);
+
+			while(value < led_pwm)
+			{
+				if(led_pwm > PWM_MIN_VAL+INC_VAL)
+				{
+					led_pwm = led_pwm - INC_VAL;
+				}
+				else
+				{
+					led_pwm = PWM_MIN_VAL;
+				}
+
+				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, led_pwm);
+				HAL_Delay(DIM_DELAY);
+			}
+		}
+
+	}
+}
+
+
+void Log_PWM()
+{
+#ifdef DEBUG_MSG
+	Log_msg_length = sprintf(Log_msg, "Mode: CH3: %lu  ",getMode(RC_CH3));
+	Logl(Log_msg, Log_msg_length);
+	Log_msg_length = sprintf(Log_msg, "CH4: %lu\r\n",getMode(RC_CH4));
+	Logl(Log_msg, Log_msg_length);
+
+	Log_msg_length = sprintf(Log_msg, "Last: CH3: %lu  ",getLast(RC_CH3));
+	Logl(Log_msg, Log_msg_length);
+	Log_msg_length = sprintf(Log_msg, "CH4: %lu\r\n",getLast(RC_CH4));
+	Logl(Log_msg, Log_msg_length);
+#endif  // DEBUG_MSG
+}
+
+
+void PWM_Control_Process()
+{
+	RC_COMMANDS_E command = CMD_NONE;
+
+	if(!isEmpty(&commandQueue))
+	{
+		command = (RC_COMMANDS_E) dequeue(&commandQueue);
+
+		switch (command) {
+		case CMD_TURN_OFF:
+			DimTo(0);
+			break;
+		case CMD_HALF_ON:
+			DimTo(250);
+			break;
+		case CMD_FULL_ON:
+			DimTo(1000);
+			break;
+		default:
+			//unknown command
+			//something went wrong. reset queue and turn off led
+			initializeQueue(&commandQueue);
+			LED_Off();
+			break;
+		}
+
+	}
+}
+
+void reset()
+{
+	initializeQueue(&commandQueue);
+
+	led_pwm = 0;
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, led_pwm);
+
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+}
+
+
+
+void mode_Dim_LED()
+{
+	switch (mode_ch3)
+	{
+	case RC_MODE3_0:
+
+		if(!isFull(&commandQueue))
+		{
+			enqueue(&commandQueue, (int)CMD_TURN_OFF);
+		}
+
+		break;
+	case RC_MODE3_1:
+
+		if(!isFull(&commandQueue))
+		{
+			enqueue(&commandQueue, (int)CMD_HALF_ON);
+		}
+		break;
+	case RC_MODE3_2:
+		if(!isFull(&commandQueue))
+		{
+			enqueue(&commandQueue, (int)CMD_FULL_ON);
+		}
+
+		break;
+	default:
+		if(!isFull(&commandQueue))
+		{
+			enqueue(&commandQueue, (int)CMD_TURN_OFF);
+		}
+		break;
+	}
+}
+
+void mode_Blink_LED()
+{
+
+}
+
+void process_Mode(){
+
+	switch (mode_ch4) {
+		case RC_MODE4_OFF:
+			reset();
+			break;
+		case RC_MODE4_0:
+			mode_Dim_LED();
+			break;
+		case RC_MODE4_1:
+			mode_Blink_LED();
+			break;
+		default:
+			break;
+	}
+
+
+
+
+
+
+
+
+	Log_PWM();
+
+}
 
 uint32_t map_pulse_width(uint32_t pwm_in_pulse_width)
 {
